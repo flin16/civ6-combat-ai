@@ -181,6 +181,9 @@ function CityBuild(city)
 	table.sort(rec, function(a, b)
 		return a.BuildItemScore > b.BuildItemScore
 	end)
+	for _, row in pairs(rec) do
+		print_tb(hashTable[row.BuildItemHash])
+	end
 	for k, v in pairs(rec) do
 		local hash = v.BuildItemHash
 		local row = hashTable[hash]
@@ -197,8 +200,9 @@ function CityBuild(city)
 			return CityManager.RequestOperation(city, CityOperationTypes.BUILD, tParameters)
 		end
 		local canStart, results = canStartOperation()
+		results = results or {}
 		if canStart then
-			if results ~= nil and objectType == ("District"):upper() then
+			if objectType == ("District"):upper() then
 				local plots = Index2Plots(results[CityOperationResults.PLOTS] or {})
 				for _, plot in pairs(plots) do
 					tParameters[CityOperationTypes.PARAM_X] = plot:GetX()
@@ -209,12 +213,12 @@ function CityBuild(city)
 					end
 				end
 			elseif objectType == ("Unit"):upper() then
-				local formTypes = { "Army", "Crops" }
+				local formTypes = { "Army", "Corps" }
 				local canForm = false
 				for _, form in pairs(formTypes) do
-					canForm = results[CityOperationResults["CAN_TRAIN_" .. form:upper()]]
+					canForm = results[CityOperationResults["CAN_TRAIN_" .. form:upper()]] or false
 					if canForm then
-						tParameters[CityCommandTypes.MILITARY_FORMATION_TYPE] =
+						tParameters[CityOperationTypes.MILITARY_FORMATION_TYPE] =
 							MilitaryFormationTypes[form:upper() .. "_MILITARY_FORMATION"]
 						request()
 						break
