@@ -132,17 +132,14 @@ function Research(player)
 	end
 end
 
-function CheckOwnedUnits(player)
+function CheckOwnedUnits(player, getType)
 	-- TODO: Cache units
-	local units = player:GetUnits():Members() or {}
+	local units = GetPlayerUnits(player)
 	if not units then
 		return
 	end
 	local distro = {}
 	local cnt = 0
-	local function getType(unit)
-		return GameInfo.Units[unit:GetUnitType()].Domain
-	end
 	for _, unit in pairs(units) do
 		local type = getType(unit)
 		if not distro[type] then
@@ -151,26 +148,35 @@ function CheckOwnedUnits(player)
 		distro[type] = distro[type] + 1
 		cnt = cnt + 1
 	end
-	for _, type in pairs(distro) do
-		distro[type] = distro[type] / cnt
+	for k, v in pairs(distro) do
+		distro[k] = v / cnt
 	end
 	return min(distro)
 end
 
+-- TODO: deal with the case when lowKind is not in rec
 function CityBuild(city)
 	if city:GetBuildQueue():GetSize() > 0 then
 		return false, nil
 	end
+	local function classifier(unit)
+		local row
+		if type(unit) ~= "number" then
+			row = GameInfo.Units[unit:GetUnitType()]
+		else
+			row = hashTable[unit]
+		end
+		local kinds = { "Combat", "RangedCombat", "Bombard" }
+		local params = {}
+		for _, kind in pairs(kinds) do
+			params[kind] = row[kind] or 0
+		end
+		local _, maxArg = max(params)
+		return maxArg
+	end
 	local cityAI = city:GetCityAI()
 	local rec = cityAI:GetBuildRecommendations()
-	local lowRatio, lowType = CheckOwnedUnits(city:GetOwner())
-	-- Debug output
-	print("City Build Recommendations for city at (" .. city:GetX() .. ", " .. city:GetY() .. "):")
-	for _, v in pairs(rec) do
-		local hash = v.BuildItemHash
-		local row = hashTable[hash]
-		print_tb(row)
-	end
+	local lowRatio, lowType = CheckOwnedUnits(Players[city:GetOwner()], classifier)
 	for k, v in pairs(rec) do
 		local hash = v.BuildItemHash
 		local row = hashTable[hash]
@@ -198,7 +204,7 @@ function CityBuild(city)
 						break
 					end
 				end
-			elseif lowRatio > 0.10 or row.Domain == lowType then
+			elseif lowRatio > 0.10 or classifier(hash) == lowType then
 				request()
 			end
 			return true, row
