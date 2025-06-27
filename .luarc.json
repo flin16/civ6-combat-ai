@@ -1,0 +1,24 @@
+{
+    "diagnostics.globals": [
+        "Game",
+        "UnitOperationTypes",
+        "Players",
+        "Map",
+        "UnitOperationMoveModifiers",
+        "Events",
+        "UnitManager",
+        "CombatManager",
+        "CombatResultParameters",
+        "Units",
+        "GameInfo",
+        "UnitCommandTypes",
+        "UI",
+        "PlayerOperations",
+        "CityManager",
+        "CityCommandTypes",
+        "CityOperationResults",
+        "UnitOperationResults",
+        "CityOperationTypes",
+        "Cities"
+    ]
+}
