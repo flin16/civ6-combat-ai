@@ -132,9 +132,45 @@ function Research(player)
 	end
 end
 
+function CheckOwnedUnits(player)
+	-- TODO: Cache units
+	local units = player:GetUnits():Members() or {}
+	if not units then
+		return
+	end
+	local distro = {}
+	local cnt = 0
+	local function getType(unit)
+		return GameInfo.Units[unit:GetUnitType()].Domain
+	end
+	for _, unit in pairs(units) do
+		local type = getType(unit)
+		if not distro[type] then
+			distro[type] = 0
+		end
+		distro[type] = distro[type] + 1
+		cnt = cnt + 1
+	end
+	for _, type in pairs(distro) do
+		distro[type] = distro[type] / cnt
+	end
+	return min(distro)
+end
+
 function CityBuild(city)
+	if city:GetBuildQueue():GetSize() > 0 then
+		return false, nil
+	end
 	local cityAI = city:GetCityAI()
 	local rec = cityAI:GetBuildRecommendations()
+	local lowRatio, lowType = CheckOwnedUnits(city:GetOwner())
+	-- Debug output
+	print("City Build Recommendations for city at (" .. city:GetX() .. ", " .. city:GetY() .. "):")
+	for _, v in pairs(rec) do
+		local hash = v.BuildItemHash
+		local row = hashTable[hash]
+		print_tb(row)
+	end
 	for k, v in pairs(rec) do
 		local hash = v.BuildItemHash
 		local row = hashTable[hash]
@@ -162,7 +198,7 @@ function CityBuild(city)
 						break
 					end
 				end
-			else
+			elseif lowRatio > 0.10 or row.Domain == lowType then
 				request()
 			end
 			return true, row
@@ -240,7 +276,6 @@ function UnitRangeAttack(unit)
 end
 
 local playerZone = {}
-local vassalZone = {}
 local enemyZone = {}
 local front = {}
 
@@ -720,6 +755,7 @@ function GetZOC(unit)
 	return Map.GetAdjacentPlots(unit:GetX(), unit:GetY())
 end
 
+-- TODO: Reconsider the following 4 functions
 --- always return back table of indexs
 function GetPlayerZone(player)
 	local domain = Plots2Index(GetOwnedPlots(player))
@@ -742,10 +778,10 @@ function GetEnemyZone(player)
 	return eZones
 end
 
+--- Return plots rather than indexs
 function GetFrontier(player)
-	-- Return plots rather than indexs
 	playerZone = GetPlayerZone(player)
-	vassalZone = GetVassalZone(player)
+	local vassalZone = GetVassalZone(player)
 	playerZone = union(playerZone, vassalZone)
 	enemyZone = GetEnemyZone(player)
 	-- TODO: simplify this
@@ -754,11 +790,6 @@ function GetFrontier(player)
 		return Map.GetPlot(u:GetX(), u:GetY())
 	end))
 	enemyZone = subtract(enemyZone, pUnitLocs)
-	-- local eUnits = GetEnemyUnits(player)
-	-- local eUnitLocs = Plots2Index(map(eUnits, function(u)
-	-- 	return Map.GetPlot(u:GetX(), u:GetY())
-	-- end))
-	-- enemyZone = union(enemyZone, eUnitLocs)
 	local frontier = {}
 	for _, plot in pairs(Index2Plots(playerZone)) do
 		if not table_contains(enemyZone, plot:GetIndex()) then
