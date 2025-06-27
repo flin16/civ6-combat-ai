@@ -91,8 +91,11 @@ local function table_contains(tbl, val)
 	return false
 end
 
+local aCities = {}
 local cityLocs = {}
 local enemiesID = {}
+local eCities = {}
+local eCityLocs = {}
 local promoC2T = {}
 local hashTable = {}
 
@@ -335,13 +338,14 @@ function OnPlayerTurnActivated(playerID)
 		return
 	end
 	debugTurnInfo(playerID)
-	Research(player)
-	front = GetFrontier(player)
-	cityLocs = GetCities()
-	-- show(front)
+	-- first find enemy ids
 	enemiesID = map(GetEnemies(player), function(e)
 		return e:GetID()
 	end)
+	Research(player)
+	front = GetFrontier(player)
+	GetCities(true)
+	local strengthDiff = GetStrengthDiff(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
 		DistrictAttack(city)
@@ -365,31 +369,31 @@ function OnPlayerTurnActivated(playerID)
 			elseif unit:GetRange() > 0 then
 				attacked = UnitRangeAttack(unit)
 				if not attacked then
-					if GetStrengthDiff(player) > 5 then
+					if strengthDiff > 5 then
 						Rush(unit, 0)
 					else
 						Rush(unit, 1)
 					end
 				end
 			elseif unit:GetCombat() > 0 then
-				local eUnits = GetUnitNearbyEnemy(unit)
-				if not eUnits then
+				local ePlots = GetMeleeTargets(unit)
+				if not ePlots then
 					break
 				end
 				local target = nil
-				for _, eUnit in pairs(eUnits) do
-					local res = CombatManager.SimulateAttackVersus(unit:GetComponentID(), eUnit:GetComponentID()) or {}
+				for _, ePlot in pairs(ePlots) do
+					local res = CombatManager.SimulateAttackVersus(unit:GetComponentID(), ePlot:GetComponentID()) or {}
 					local attRes = res[CombatResultParameters.ATTACKER] or {}
 					local cost = attRes[CombatResultParameters.DAMAGE_TO]
 					if cost then
-						if eUnit:GetRange() > 0 then
-							local isCity = table_contains(cityLocs, Map.GetPlotIndex(eUnit:GetX(), eUnit:GetY()))
+						if ePlot:GetRange() > 0 then
+							local isCity = table_contains(cityLocs, Map.GetPlotIndex(ePlot:GetX(), ePlot:GetY()))
 							if not isCity then
 								cost = cost - 10
 							end
 						end
 						if cost < 25 then
-							target = eUnit
+							target = ePlot
 							break
 						end
 					end
@@ -400,7 +404,7 @@ function OnPlayerTurnActivated(playerID)
 				end
 				if not attacked then
 					local lowBound = 0
-					if GetStrengthDiff(player) > 5.0 then
+					if strengthDiff > 5.0 then
 						lowBound = -1
 					end
 					if not Rush(unit, lowBound) then
@@ -650,7 +654,6 @@ end
 
 function GetStrengthDiff(player)
 	local pUnits = GetPlayerUnits(player)
-	-- TODO: reduce the use of this function to speed up
 	local eUnits = GetEnemyUnits(player)
 	if #eUnits == 0 then
 		return 1000
@@ -674,17 +677,21 @@ function GetPlotNearbyEnemy(x, y)
 	return eUnits
 end
 
--- TODO: exclude cities
-function GetUnitNearbyEnemy(pUnit)
+-- TODO: test if cities are included
+function GetMeleeTargets(pUnit)
 	local adjs = DfsManager(pUnit, limit1turn)
 	local ans = {}
 	for _, plot in pairs(adjs) do
-		for _, eUnit in pairs(Units.GetUnitsInPlot(plot)) do
+		local uPlots = Units.GetUnitsInPlot(plot)
+		for _, eUnit in pairs(uPlots) do
 			if eUnit ~= nil then
 				if table_contains(enemiesID, eUnit:GetOwner()) then
 					table.insert(ans, eUnit)
 				end
 			end
+		end
+		if table_contains(eCityLocs, plot:GetIndex()) then
+			table.insert(ans, CityManager.GetCityAt(plot:GetX(), plot:GetY()))
 		end
 	end
 	return ans
@@ -705,19 +712,28 @@ function MeleeAttackPlot(pUnit, plot)
 	end
 end
 
---- Return indexs ofplots of cities owned by all players
-function GetCities()
+--- Return cities
+--- TODO: test update
+function GetCities(init)
 	local res = {}
 	local players = Game.GetPlayers()
 	for _, player in pairs(players) do
 		if player.GetCities then
 			local cities = player:GetCities() or {}
 			for _, city in cities:Members() do
-				table.insert(res, Map.GetPlotIndex(city:GetX(), city:GetY()))
+				table.insert(res, city)
 			end
 		end
 	end
-	return res
+	if not init then
+		return res
+	end
+	aCities = res
+	cityLocs = Index2Plots(aCities)
+	eCities = filter(aCities, function(c)
+		return table_contains(enemiesID, c:GetOwner())
+	end)
+	eCityLocs = Index2Plots(eCities)
 end
 
 function GetCityPlots(city)
