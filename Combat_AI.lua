@@ -132,7 +132,8 @@ function Research(player)
 	end
 end
 
-function CheckOwnedUnits(player, getType)
+--- Return back lowRatio and corresponding Type hash
+function CheckLowUnits(player, getType)
 	-- TODO: Cache units
 	local units = GetPlayerUnits(player)
 	if not units then
@@ -148,10 +149,17 @@ function CheckOwnedUnits(player, getType)
 		distro[type] = distro[type] + 1
 		cnt = cnt + 1
 	end
+	local lowCount, lowType = min(distro)
+	for _, unit in pairs(units) do
+		if getType(unit) == lowType then
+			lowType = GameInfo.Units[unit:GetUnitType()].Hash
+			break
+		end
+	end
 	for k, v in pairs(distro) do
 		distro[k] = v / cnt
 	end
-	return min(distro)
+	return lowCount / cnt, lowType
 end
 
 -- TODO: deal with the case when lowKind is not in rec
@@ -176,14 +184,14 @@ function CityBuild(city)
 	end
 	local cityAI = city:GetCityAI()
 	local rec = cityAI:GetBuildRecommendations()
-	-- TODO: use this
-	-- local lowRatio, lowType = CheckOwnedUnits(Players[city:GetOwner()], classifier)
+	local lowRatio, lowHash = CheckLowUnits(Players[city:GetOwner()], classifier)
+	print(lowRatio, hashTable[lowHash].Name)
+	if lowRatio < 0.15 then
+		table.insert(rec, { BuildItemHash = lowHash, BuildItemScore = math.huge })
+	end
 	table.sort(rec, function(a, b)
 		return a.BuildItemScore > b.BuildItemScore
 	end)
-	for _, row in pairs(rec) do
-		print_tb(hashTable[row.BuildItemHash])
-	end
 	for k, v in pairs(rec) do
 		local hash = v.BuildItemHash
 		local row = hashTable[hash]
