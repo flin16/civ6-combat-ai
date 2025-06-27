@@ -22,6 +22,16 @@ local function graph(tbl, func)
 	return result
 end
 
+local function filter(tbl, func)
+	local result = {}
+	for k, v in pairs(tbl) do
+		if func(v) then
+			result[k] = v
+		end
+	end
+	return result
+end
+
 local function table_union(ts)
 	local result = {}
 	if not ts then
@@ -149,7 +159,6 @@ function CheckLowUnits(player, getType)
 		distro[type] = distro[type] + 1
 		cnt = cnt + 1
 	end
-	print_tb(distro)
 	local lowCount, lowType = min(distro)
 	for _, unit in pairs(units) do
 		if getType(unit) == lowType then
@@ -797,7 +806,11 @@ end
 -- TODO: Reconsider the following 4 functions
 --- always return back table of indexs
 function GetPlayerZone(player)
-	local domain = Plots2Index(GetOwnedPlots(player))
+	local domain = GetOwnedPlots(player)
+	-- domain = filter(domain, function(p)
+	-- 	return not p:IsMountain()
+	-- end)
+	domain = Plots2Index(domain)
 	local pUnits = GetPlayerUnits(player)
 	local pUnitLocs = Plots2Index(map(pUnits, function(u)
 		return Map.GetPlot(u:GetX(), u:GetY())
@@ -846,6 +859,9 @@ function GetFrontier(player)
 			end
 		end
 	end
+	frontier = filter(frontier, function(p)
+		return not p:IsMountain()
+	end)
 	return frontier
 end
 
