@@ -19,6 +19,7 @@
         "CityOperationResults",
         "UnitOperationResults",
         "CityOperationTypes",
-        "Cities"
+        "Cities",
+        "MilitaryFormationTypes"
     ]
 }

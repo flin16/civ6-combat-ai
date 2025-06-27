@@ -176,7 +176,11 @@ function CityBuild(city)
 	end
 	local cityAI = city:GetCityAI()
 	local rec = cityAI:GetBuildRecommendations()
-	local lowRatio, lowType = CheckOwnedUnits(Players[city:GetOwner()], classifier)
+	-- TODO: use this
+	-- local lowRatio, lowType = CheckOwnedUnits(Players[city:GetOwner()], classifier)
+	table.sort(rec, function(a, b)
+		return a.BuildItemScore > b.BuildItemScore
+	end)
 	for k, v in pairs(rec) do
 		local hash = v.BuildItemHash
 		local row = hashTable[hash]
@@ -204,7 +208,22 @@ function CityBuild(city)
 						break
 					end
 				end
-			elseif lowRatio > 0.10 or classifier(hash) == lowType then
+			elseif objectType == ("Unit"):upper() then
+				local formTypes = { "Army", "Crops" }
+				local canForm = false
+				for _, form in pairs(formTypes) do
+					canForm = results[CityOperationResults["CAN_TRAIN_" .. form:upper()]]
+					if canForm then
+						tParameters[CityCommandTypes.MILITARY_FORMATION_TYPE] =
+							MilitaryFormationTypes[form:upper() .. "_MILITARY_FORMATION"]
+						request()
+						break
+					end
+				end
+				if not canForm then
+					request()
+				end
+			else
 				request()
 			end
 			return true, row
