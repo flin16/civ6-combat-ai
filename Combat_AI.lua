@@ -134,7 +134,7 @@ end
 
 --- Return back lowRatio and corresponding Type hash
 function CheckLowUnits(player, getType)
-	-- TODO: Cache units
+	-- TODO: Cache units and avoid use units alive
 	local units = GetPlayerUnits(player)
 	if not units then
 		return
@@ -149,6 +149,7 @@ function CheckLowUnits(player, getType)
 		distro[type] = distro[type] + 1
 		cnt = cnt + 1
 	end
+	print_tb(distro)
 	local lowCount, lowType = min(distro)
 	for _, unit in pairs(units) do
 		if getType(unit) == lowType then
@@ -167,6 +168,7 @@ function CityBuild(city)
 	if city:GetBuildQueue():GetSize() > 0 then
 		return false, nil
 	end
+	-- TODO: make it smarter
 	local function classifier(unit)
 		local row
 		if type(unit) ~= "number" then
@@ -174,18 +176,18 @@ function CityBuild(city)
 		else
 			row = hashTable[unit]
 		end
-		local kinds = { "Combat", "RangedCombat", "Bombard" }
-		local params = {}
-		for _, kind in pairs(kinds) do
-			params[kind] = row[kind] or 0
-		end
-		local _, maxArg = max(params)
-		return maxArg
+		return row.Name
+		-- local kinds = { "Combat", "RangedCombat", "Bombard" }
+		-- local params = {}
+		-- for _, kind in pairs(kinds) do
+		-- 	params[kind] = row[kind] or 0
+		-- end
+		-- local _, maxArg = max(params)
+		-- return maxArg
 	end
 	local cityAI = city:GetCityAI()
 	local rec = cityAI:GetBuildRecommendations()
 	local lowRatio, lowHash = CheckLowUnits(Players[city:GetOwner()], classifier)
-	print(lowRatio, hashTable[lowHash].Name)
 	if lowRatio < 0.15 then
 		table.insert(rec, { BuildItemHash = lowHash, BuildItemScore = math.huge })
 	end
