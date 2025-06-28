@@ -73,9 +73,9 @@ local function table_union(ts)
 	if not ts then
 		return {}
 	end
-	for _, t in ipairs(ts) do
+	for _, t in pairs(ts) do
 		if t then
-			for _, v in ipairs(t) do
+			for _, v in pairs(t) do
 				table.insert(result, v)
 			end
 		end
@@ -85,7 +85,7 @@ end
 
 local function unique(t)
 	local result = {}
-	for _, v in ipairs(t) do
+	for _, v in pairs(t) do
 		if not table_contains(result, v) then
 			table.insert(result, v)
 		end
@@ -96,8 +96,8 @@ end
 local function union(...)
 	local tables = { ... }
 	local result = {}
-	for _, tbl in ipairs(tables) do
-		for _, v in ipairs(tbl) do
+	for _, tbl in pairs(tables) do
+		for _, v in pairs(tbl) do
 			table.insert(result, v)
 		end
 	end
@@ -118,7 +118,7 @@ local function subtract(tbl1, tbl2)
 	if not tbl1 then
 		return result
 	end
-	for _, v in ipairs(tbl1) do
+	for _, v in pairs(tbl1) do
 		if not table_contains(tbl2, v) then
 			table.insert(result, v)
 		end
@@ -162,10 +162,13 @@ local function show(t)
 end
 
 local aCities = {}
+local pCities = {}
+local pTowers = {}
 local cityLocs = {}
 local enemiesID = {}
 local eCities = {}
 local eCityLocs = {}
+local eTowers = {}
 local promoC2T = {}
 local hashTable = {}
 
@@ -411,9 +414,9 @@ function OnPlayerTurnActivated(playerID)
 		return e:GetID()
 	end)
 	Research(player)
-	GetCities(true)
+	GetCities(player)
 	front = GetFrontier(player)
-	show(front)
+	ShowEval(player)
 	local strengthDiff = GetStrengthDiff(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
@@ -501,7 +504,7 @@ function ShowEval(player)
 		if plot then
 			local x = plot:GetX()
 			local y = plot:GetY()
-			print("Plot index:", index, "at", x, y, "Grade:", grade)
+			-- print("Plot index:", index, "at", x, y, "Grade:", grade)
 			if grade then
 				UI.AddWorldViewText(0, round(grade, 2), x, y, 0)
 			end
@@ -552,8 +555,13 @@ function EvalMap(player)
 		if type(b) == "number" then
 			b = const(b)
 		end
-		return function(p)
-			return (a(p) or 0) * (b(p) or 1)
+		return function(...)
+			local resA = a(...)
+			local resB = b(...)
+			if not resA or not resB then
+				return false
+			end
+			return resA * resB
 		end
 	end
 	local function eval_wraper(func)
@@ -564,13 +572,9 @@ function EvalMap(player)
 	local function eval_unit(unit)
 		return 1.0 - unit:GetDamage() / unit:GetMaxDamage()
 	end
-	local playerID = player:GetID()
 	local vassals = GetVassals(player)
 	local vassalID = map(vassals, function(v)
 		return v:GetID()
-	end)
-	local pCities = filter(aCities, function(c)
-		return playerID == c:GetOwner()
 	end)
 	local vCities = filter(aCities, function(c)
 		return table_contains(vassalID, c:GetOwner())
@@ -590,17 +594,23 @@ function EvalMap(player)
 	grader(pDomain, eval_wraper(const(1.5)))
 	grader(vDomain, eval_wraper(const(0.5)))
 	grader(eDomain, eval_wraper(const(-1.5)))
+	grader(pTowers, function(tower)
+		return DfsManager(tower, limitN(2))
+	end)
+	grader(eTowers, function(tower)
+		return DfsManager(tower, mul(limitN(2), -1))
+	end)
 	local pUnits = GetPlayerUnits(player)
 	local vUnits = map_union(vassals, GetPlayerUnits)
 	local eUnits = GetEnemyUnits(player)
 	grader(pUnits, function(unit)
-		return DfsManager(unit, mul(limitN(2), eval_unit))
+		return DfsManager(unit, limitN(2))
 	end)
 	grader(vUnits, function(unit)
 		return DfsManager(unit, limitN(1))
 	end)
 	grader(eUnits, function(unit)
-		return DfsManager(unit, compose(neg, mul(limitN(2), eval_unit)))
+		return DfsManager(unit, mul(limitN(2), -1))
 	end)
 	return tot
 end
@@ -907,27 +917,44 @@ function MeleeAttackPlot(pUnit, plot)
 	end
 end
 
+function GetCityTower(city)
+	local res = {}
+	for _, district in city:GetDistricts():Members() do
+		local combat = district:GetBaseDefenseStrength()
+		if combat > 0 then
+			table.insert(res, district)
+		end
+	end
+	return res
+end
+
 --- Return cities
---- TODO: test update
-function GetCities(init)
+function GetCities(player)
 	local res = {}
 	local players = Game.GetPlayers()
-	for _, player in pairs(players) do
-		if player.GetCities then
-			local cities = player:GetCities() or {}
+	for _, p in pairs(players) do
+		if p.GetCities then
+			local cities = p:GetCities() or {}
 			for _, city in cities:Members() do
 				table.insert(res, city)
 			end
 		end
 	end
-	if not init then
-		return res
-	end
 	aCities = res
 	cityLocs = Index2Plots(aCities)
-	eCities = filter(aCities, function(c)
-		return table_contains(enemiesID, c:GetOwner())
-	end)
+	pCities = {}
+	eCities = {}
+	local pPlayerID = player:GetID()
+	for _, city in pairs(aCities) do
+		local owner = city:GetOwner()
+		if owner == pPlayerID then
+			table.insert(pCities, city)
+		elseif table_contains(enemiesID, owner) then
+			table.insert(eCities, city)
+		end
+	end
+	pTowers = map_union(pCities, GetCityTower)
+	eTowers = map_union(eCities, GetCityTower)
 	eCityLocs = Index2Plots(eCities)
 end
 
