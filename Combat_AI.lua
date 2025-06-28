@@ -409,6 +409,9 @@ local front = {}
 local pStrength = 0
 local eStrength = 0
 local strengthDiff = 0
+local safetyGrade = {}
+local rangedGrade = {}
+local chockeGrade = {}
 
 GetPromotionTable()
 GetHashTable()
@@ -427,6 +430,19 @@ function OnPlayerTurnActivated(playerID)
 	front = GetFrontier(player)
 	strengthDiff = GetStrengthDiff(player)
 	-- Do this lastly
+	-- Test best ranged position calculation
+	-- for _, plot in pairs(front) do
+	-- 	local adjs = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
+	-- 	local m = max(map(adjs, function(p)
+	-- 		local score = safetyGrade[p:GetIndex()]
+	-- 		if score >= 0 then
+	-- 			return 0
+	-- 		end
+	-- 		return -score * safetyGrade[plot:GetIndex()]
+	-- 	end))
+	-- 	m = math.sqrt(math.abs(m)) + (rangedGrade[plot:GetIndex()] or 0)
+	-- 	UI.AddWorldViewText(0, round(m, 2), plot:GetX(), plot:GetY(), 0)
+	-- end
 	ShowEval(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
@@ -496,7 +512,8 @@ function OnPlayerTurnActivated(playerID)
 end
 
 function ShowEval(player)
-	local eval = EvalMap(player)
+	EvalMap(player)
+	local eval = chockeGrade
 	local cnt = 0
 	for _, _ in pairs(eval) do
 		cnt = cnt + 1
@@ -521,6 +538,7 @@ function EvalMap(player)
 		for _, obj in pairs(objs) do
 			local plots, grades = func(obj)
 			if not grades then
+				obj = Map.GetPlot(obj:GetX(), obj:GetY())
 				local index = obj:GetIndex()
 				local grade = plots
 				grades = { [index] = grade }
@@ -616,6 +634,17 @@ function EvalMap(player)
 	grader(eUnits, function(unit)
 		return DfsManager(unit, mul(mul(limitN(2), eval_unit(unit)), -1))
 	end)
+	grader(eUnits, function(unit)
+		if unit:GetRange() == 0 or IsAir(unit) then
+			return
+		end
+		local plots = GetRangeAttackTargets(unit)
+		local grades = {}
+		for _, plot in pairs(plots) do
+			grades[plot:GetIndex()] = -1
+		end
+		return plots, grades
+	end)
 	local aPlots = {}
 	for i = 1, Map.GetPlotCount() do
 		aPlots[i] = Map.GetPlotByIndex(i)
@@ -623,8 +652,41 @@ function EvalMap(player)
 	grader(aPlots, function(plot)
 		return plot:GetDefenseModifier() / 6
 	end)
-	local safety = tot
-	return tot
+	safetyGrade = tot
+	tot = {}
+	grader(aPlots, function(plot)
+		if plot:IsHills() then
+			return 1
+		end
+	end)
+	grader(pTowers, const(2))
+	grader(eCities, function(city)
+		return DfsManager(city, function(plot)
+			local dist = Distance2Plots(city, { plot })
+			if dist > 2 then
+				return false
+			end
+			if dist == 2 then
+				return 2
+			end
+			return 0
+		end)
+	end)
+	rangedGrade = tot
+	tot = {}
+	for _, unit in pairs(pUnits) do
+		for _, plot in pairs(Map.GetAdjacentPlots(unit:GetX(), unit:GetY())) do
+			local index = plot:GetIndex()
+			if tot[index] == nil and safetyGrade[index] < 0 then
+				tot[index] = 1
+			end
+		end
+	end
+	grader(eCities, function(c)
+		return DfsManager(c, mul(limitN(2), 3))
+	end)
+	chockeGrade = tot
+	return safetyGrade
 end
 
 function UnitHealthy(pUnit)
