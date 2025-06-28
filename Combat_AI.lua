@@ -131,12 +131,17 @@ local function print_tb(t)
 end
 
 local function show(t)
-	local zt = table_union(t)
-	for k, v in pairs(t) do
-		local x = v:GetX()
-		local y = v:GetY()
-		print(k, x, y)
-		UI.AddWorldViewText(0, "Here", x, y, 0)
+	print("Showing table:" .. t)
+	for k, row in pairs(t) do
+		local x = row:GetX()
+		local y = row:GetY()
+		local v = row.Value or ""
+		if not v and row.GetProperty then
+			v = row:GetProperty("Value")
+		end
+		local c = row.Content or v or "Here"
+		print("Plot at (" .. x .. ", " .. y .. ")" .. v)
+		UI.AddWorldViewText(0, c, x, y, 0)
 	end
 end
 
@@ -224,7 +229,6 @@ function CheckLowUnits(player, getType)
 	return lowCount / cnt, lowType
 end
 
--- TODO: deal with the case when lowKind is not in rec
 function CityBuild(city)
 	if city:GetBuildQueue():GetSize() > 0 then
 		return false, nil
@@ -307,7 +311,6 @@ function CityBuild(city)
 	return false, nil
 end
 
---TODO: It seems that attacking is prior to promotion even if I wrote promotion first
 function GetPromotionTable()
 	for row in GameInfo.UnitPromotions() do
 		if not promoC2T[row.PromotionClass] then
@@ -407,11 +410,16 @@ function OnPlayerTurnActivated(playerID)
 		local exp = unit:GetExperience()
 		local expToNext = exp:GetExperienceForNextLevel()
 		local expNow = exp:GetExperiencePoints()
-		-- TODO: flatten the logic using goto
 		if expNow >= expToNext then
 			Promote(unit)
 		elseif IsAir(unit) then
-			UnitRangeAttack(unit)
+			if UnitHealthy(unit) then
+				UnitRangeAttack(unit)
+			end
+		--TODO: overhaul logic
+		-- elseif unit:GetRange() > 0 then
+		-- elseif unit:GetCombat() > 0 then
+		-- end
 		else
 			local attacked = false
 			if not UnitHealthy(unit) and Distance2Plots(unit, front) < 5 then
@@ -564,6 +572,9 @@ function UnitFortify(pUnit)
 end
 
 function Turn2Plots(unit, plots)
+	if plots.GetX then
+		plots = { plots }
+	end
 	local mTurn = math.huge
 	for _, plot in pairs(plots) do
 		if unit:GetX() == plot:GetX() and unit:GetY() == plot:GetY() then
