@@ -567,8 +567,15 @@ function EvalMap(player)
 			return { p }, { [p:GetIndex()] = func(p) }
 		end
 	end
+	local aveStrength = pStrength - math.log(length(GetPlayerUnits(player)), 2) * 10
 	local function eval_unit(unit)
-		return (1.0 - unit:GetDamage() / unit:GetMaxDamage()) * unit:GetCombat() / pStrength
+		local sRatio = math.pow(2, unit:GetCombat() - aveStrength)
+		if sRatio < 0.5 then
+			sRatio = 0.5
+		elseif sRatio > 2.0 then
+			sRatio = 2.0
+		end
+		return (1.0 - unit:GetDamage() / unit:GetMaxDamage()) * sRatio
 	end
 	local vassals = GetVassals(player)
 	local vassalID = map(vassals, function(v)
@@ -584,7 +591,7 @@ function EvalMap(player)
 		return DfsManager(city, limitN(2))
 	end)
 	grader(eCities, function(city)
-		return DfsManager(city, mul(limitN(3), -1))
+		return DfsManager(city, mul(limitN(4), -1.5))
 	end)
 	local pDomain = GetOwnedPlots(player)
 	local vDomain = map_union(GetVassals(player), GetOwnedPlots)
@@ -596,7 +603,7 @@ function EvalMap(player)
 		return DfsManager(tower, limitN(2))
 	end)
 	grader(eTowers, function(tower)
-		return DfsManager(tower, mul(limitN(2), -1))
+		return DfsManager(tower, mul(limitN(2), -1.5))
 	end)
 	local pUnits = GetPlayerUnits(player)
 	local vUnits = map_union(vassals, GetPlayerUnits)
