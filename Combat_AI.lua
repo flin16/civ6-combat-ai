@@ -522,6 +522,12 @@ function EvalMap(player)
 	local function grader(objs, func)
 		for _, obj in pairs(objs) do
 			local plots, grades = func(obj)
+			if not grades then
+				local index = obj:GetIndex()
+				local grade = plots
+				grades = { [index] = grade }
+				plots = { obj }
+			end
 			for _, plot in pairs(plots) do
 				local index = plot:GetIndex()
 				if index then
@@ -562,11 +568,6 @@ function EvalMap(player)
 			return resA * resB
 		end
 	end
-	local function eval_wraper(func)
-		return function(p)
-			return { p }, { [p:GetIndex()] = func(p) }
-		end
-	end
 	local aveStrength = pStrength - math.log(length(GetPlayerUnits(player)), 2) * 10
 	local function eval_unit(unit)
 		local sRatio = math.pow(2, unit:GetCombat() - aveStrength)
@@ -596,9 +597,9 @@ function EvalMap(player)
 	local pDomain = GetOwnedPlots(player)
 	local vDomain = map_union(GetVassals(player), GetOwnedPlots)
 	local eDomain = map_union(GetEnemies(player), GetOwnedPlots)
-	grader(pDomain, eval_wraper(const(1.5)))
-	grader(vDomain, eval_wraper(const(0.5)))
-	grader(eDomain, eval_wraper(const(-1.5)))
+	grader(pDomain, const(1.5))
+	grader(vDomain, const(0.5))
+	grader(eDomain, const(-1.5))
 	grader(pTowers, function(tower)
 		return DfsManager(tower, limitN(2))
 	end)
@@ -617,6 +618,14 @@ function EvalMap(player)
 	grader(eUnits, function(unit)
 		return DfsManager(unit, mul(mul(limitN(2), eval_unit(unit)), -1))
 	end)
+	local aPlots = {}
+	for i = 1, Map.GetPlotCount() do
+		aPlots[i] = Map.GetPlotByIndex(i)
+	end
+	grader(aPlots, function(plot)
+		return plot:GetDefenseModifier() / 6
+	end)
+	local safety = tot
 	return tot
 end
 
