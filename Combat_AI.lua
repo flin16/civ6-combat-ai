@@ -169,6 +169,7 @@ local enemiesID = {}
 local eCities = {}
 local eCityLocs = {}
 local eTowers = {}
+local eTowerLocs = {}
 local promoC2T = {}
 local hashTable = {}
 
@@ -431,19 +432,19 @@ function OnPlayerTurnActivated(playerID)
 	strengthDiff = GetStrengthDiff(player)
 	-- Do this lastly
 	-- Test best ranged position calculation
-	-- for _, plot in pairs(front) do
-	-- 	local adjs = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
-	-- 	local m = max(map(adjs, function(p)
-	-- 		local score = safetyGrade[p:GetIndex()]
-	-- 		if score >= 0 then
-	-- 			return 0
-	-- 		end
-	-- 		return -score * safetyGrade[plot:GetIndex()]
-	-- 	end))
-	-- 	m = math.sqrt(math.abs(m)) + (rangedGrade[plot:GetIndex()] or 0)
-	-- 	UI.AddWorldViewText(0, round(m, 2), plot:GetX(), plot:GetY(), 0)
-	-- end
-	ShowEval(player)
+	for _, plot in pairs(front) do
+		local adjs = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
+		local m = max(map(adjs, function(p)
+			local score = safetyGrade[p:GetIndex()]
+			if score >= 0 then
+				return 0
+			end
+			return -score * safetyGrade[plot:GetIndex()]
+		end))
+		m = math.sqrt(math.abs(m)) -- + (rangedGrade[plot:GetIndex()] or 0)
+		UI.AddWorldViewText(0, round(m, 2), plot:GetX(), plot:GetY(), 0)
+	end
+	-- ShowEval(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
 		DistrictAttack(city)
@@ -451,59 +452,45 @@ function OnPlayerTurnActivated(playerID)
 			DistrictAttack(district)
 		end
 	end
-	for _, unit in player:GetUnits():Members() do
-		Promote(unit)
-		if IsAir(unit) then
-			if UnitHealthy(unit) then
-				UnitRangeAttack(unit)
-			end
-		else
-			local attacked = false
-			if not UnitHealthy(unit) and Distance2Plots(unit, front) < 5 then
-				Escape(unit)
-			elseif unit:GetRange() > 0 then
-				attacked = UnitRangeAttack(unit)
-				if not attacked then
-					if strengthDiff > 5 then
-						Rush(unit, 0)
-					else
-						Rush(unit, 1)
-					end
+	for _ = 1, 2 do
+		for _, unit in player:GetUnits():Members() do
+			Promote(unit)
+			if unit:GetMovesRemaining() == 0 then
+			elseif IsAir(unit) then
+				if UnitHealthy(unit) then
+					UnitRangeAttack(unit)
 				end
-			elseif unit:GetCombat() > 0 then
-				local ePlots = GetMeleeTargets(unit)
-				if not ePlots then
-					break
-				end
-				local target = nil
-				for _, ePlot in pairs(ePlots) do
-					local res = CombatManager.SimulateAttackVersus(unit:GetComponentID(), ePlot:GetComponentID()) or {}
-					local attRes = res[CombatResultParameters.ATTACKER] or {}
-					local cost = attRes[CombatResultParameters.DAMAGE_TO]
-					if cost then
-						if ePlot:GetRange() > 0 then
-							local isCity = table_contains(cityLocs, Map.GetPlotIndex(ePlot:GetX(), ePlot:GetY()))
-							if not isCity then
-								cost = cost - 10
-							end
-						end
-						if cost < 25 then
-							target = ePlot
-							break
+			else
+				local attacked = false
+				if not UnitHealthy(unit) and Distance2Plots(unit, front) < 5 then
+					Escape(unit)
+				elseif unit:GetRange() > 0 then
+					attacked = UnitRangeAttack(unit)
+					if not attacked then
+						if strengthDiff > 5 then
+							Rush(unit, 0)
+						else
+							Rush(unit, 1)
 						end
 					end
-				end
-				if target then
-					MeleeAttackPlot(unit, target)
-					attacked = true
-				end
-				if not attacked then
-					local lowBound = 0
-					if strengthDiff > 5.0 then
-						lowBound = -1
+				elseif unit:GetCombat() > 0 then
+					local eTargets = GetMeleeTargets(unit)
+					if not eTargets then
+						break
 					end
-					if not Rush(unit, lowBound) then
-						UnitFortify(unit)
+					local target = TryMeleeAttack(unit, eTargets)
+					if target then
+						MeleeAttackPlot(unit, target)
+						attacked = true
+					end
+					if not attacked then
+						local lowBound = 0
+						if strengthDiff > 5.0 then
+							lowBound = -1
+						end
+						if not Rush(unit, lowBound) then
+							UnitFortify(unit)
+						end
 					end
 				end
 			end
@@ -828,8 +815,9 @@ function Shift(unit, grader)
 		local grades = graph(plots, grader_wrap)
 		local bestGrade, bestPlot = max(grades)
 		if bestGrade > -math.huge and bestPlot then
-			Move2Plot(unit, bestPlot)
-			return true
+			if Move2Plot(unit, bestPlot) then
+				return true
+			end
 		end
 	end
 	return false
@@ -963,7 +951,7 @@ function GetMeleeTargets(pUnit)
 				end
 			end
 		end
-		if table_contains(eCityLocs, plot:GetIndex()) then
+		if table_contains(eTowerLocs, plot:GetIndex()) then
 			table.insert(ans, CityManager.GetCityAt(plot:GetX(), plot:GetY()))
 		end
 	end
@@ -982,6 +970,32 @@ function MeleeAttackPlot(pUnit, plot)
 
 	if UnitManager.CanStartOperation(pUnit, UnitOperationTypes.MOVE_TO, nil, tParameters) then
 		UnitManager.RequestOperation(pUnit, UnitOperationTypes.MOVE_TO, tParameters)
+	end
+end
+
+function TryMeleeAttack(unit, targets)
+	for _, ePlot in pairs(targets) do
+		local res = CombatManager.SimulateAttackVersus(unit:GetComponentID(), ePlot:GetComponentID()) or {}
+		local attRes = res[CombatResultParameters.ATTACKER] or {}
+		local cost = attRes[CombatResultParameters.DAMAGE_TO]
+		local defeated = res[CombatResultParameters.ATTACKER_ADVANCED_DURING_VISUALIZATION] or {}
+		local isCity = table_contains(cityLocs, Map.GetPlotIndex(ePlot:GetX(), ePlot:GetY()))
+		local defRes = res[CombatResultParameters.DEFENDER] or {}
+		local damage = defRes[CombatResultParameters.DAMAGE_TO] or 0
+		if cost then
+			if ePlot:GetRange() > 0 then
+				if not isCity then
+					cost = cost - 10
+				end
+			end
+			if isCity then
+				if damage > cost or defeated then
+					return ePlot
+				end
+			elseif cost < 25 then
+				return ePlot
+			end
+		end
 	end
 end
 
@@ -1024,6 +1038,7 @@ function GetCities(player)
 	pTowers = map_union(pCities, GetCityTower)
 	eTowers = map_union(eCities, GetCityTower)
 	eCityLocs = Index2Plots(eCities)
+	eTowerLocs = Index2Plots(eTowers)
 end
 
 function GetCityPlots(city)
