@@ -4,6 +4,19 @@ local function debugTurnInfo(playerID)
 	print("Player ID: " .. playerID)
 end
 
+local function round(num, n)
+	local mult = 10 ^ n
+	return math.floor(num * mult + 0.5) / mult
+end
+
+local function length(tbl)
+	local count = 0
+	for _ in pairs(tbl) do
+		count = count + 1
+	end
+	return count
+end
+
 local function map(tbl, func)
 	local result = {}
 	-- Now switched to a universal version
@@ -131,17 +144,12 @@ local function print_tb(t)
 end
 
 local function show(t)
-	print("Showing table:" .. t)
-	for k, row in pairs(t) do
+	print("Showing table: ", t)
+	for _, row in pairs(t) do
 		local x = row:GetX()
 		local y = row:GetY()
-		local v = row.Value or ""
-		if not v and row.GetProperty then
-			v = row:GetProperty("Value")
-		end
-		local c = row.Content or v or "Here"
-		print("Plot at (" .. x .. ", " .. y .. ")" .. v)
-		UI.AddWorldViewText(0, c, x, y, 0)
+		print("Plot at (" .. x .. ", " .. y .. ")")
+		UI.AddWorldViewText(0, "Here", x, y, 0)
 	end
 end
 
@@ -395,9 +403,9 @@ function OnPlayerTurnActivated(playerID)
 		return e:GetID()
 	end)
 	Research(player)
-	front = GetFrontier(player)
 	GetCities(true)
-	ShowEval(player)
+	front = GetFrontier(player)
+	show(front)
 	local strengthDiff = GetStrengthDiff(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
@@ -487,7 +495,7 @@ function ShowEval(player)
 			local y = plot:GetY()
 			print("Plot index:", index, "at", x, y, "Grade:", grade)
 			if grade then
-				UI.AddWorldViewText(0, tostring(grade), x, y, 0)
+				UI.AddWorldViewText(0, round(grade, 2), x, y, 0)
 			end
 		end
 	end
@@ -529,34 +537,62 @@ function EvalMap(player)
 			return n
 		end
 	end
+	local mul = function(a, b)
+		if type(a) == "number" then
+			a = const(a)
+		end
+		if type(b) == "number" then
+			b = const(b)
+		end
+		return function(p)
+			return (a(p) or 0) * (b(p) or 1)
+		end
+	end
 	local function eval_wraper(func)
 		return function(p)
 			return { p }, { [p:GetIndex()] = func(p) }
 		end
 	end
+	local function eval_unit(unit)
+		return 1.0 - unit:GetDamage() / unit:GetMaxDamage()
+	end
 	local playerID = player:GetID()
+	local vassals = GetVassals(player)
+	local vassalID = map(vassals, function(v)
+		return v:GetID()
+	end)
 	local pCities = filter(aCities, function(c)
 		return playerID == c:GetOwner()
 	end)
+	local vCities = filter(aCities, function(c)
+		return table_contains(vassalID, c:GetOwner())
+	end)
 	grader(pCities, function(city)
-		return DfsManager(city, limitN(4))
+		return DfsManager(city, limitN(3))
+	end)
+	grader(vCities, function(city)
+		return DfsManager(city, limitN(2))
 	end)
 	grader(eCities, function(city)
-		return DfsManager(city, compose(neg, limitN(5)))
+		return DfsManager(city, compose(neg, limitN(3)))
 	end)
 	local pDomain = GetOwnedPlots(player)
-	local eDomain = map_union(GetEnemies(player), function(e)
-		return GetOwnedPlots(e)
-	end)
+	local vDomain = map_union(GetVassals(player), GetOwnedPlots)
+	local eDomain = map_union(GetEnemies(player), GetOwnedPlots)
 	grader(pDomain, eval_wraper(const(1.5)))
+	grader(vDomain, eval_wraper(const(0.5)))
 	grader(eDomain, eval_wraper(const(-1.5)))
 	local pUnits = GetPlayerUnits(player)
+	local vUnits = map_union(vassals, GetPlayerUnits)
 	local eUnits = GetEnemyUnits(player)
 	grader(pUnits, function(unit)
-		return DfsManager(unit, limitN(2))
+		return DfsManager(unit, mul(limitN(2), eval_unit))
+	end)
+	grader(vUnits, function(unit)
+		return DfsManager(unit, limitN(1))
 	end)
 	grader(eUnits, function(unit)
-		return DfsManager(unit, compose(neg, limitN(2)))
+		return DfsManager(unit, compose(neg, mul(limitN(2), eval_unit)))
 	end)
 	return tot
 end
@@ -953,38 +989,29 @@ function GetEnemyZone(player)
 	return eZones
 end
 
---- Return plots rather than indexs
 function GetFrontier(player)
-	playerZone = GetPlayerZone(player)
-	local vassalZone = GetVassalZone(player)
-	playerZone = union(playerZone, vassalZone)
-	enemyZone = GetEnemyZone(player)
-	-- TODO: simplify this
-	local pUnits = GetPlayerUnits(player)
-	local pUnitLocs = Plots2Index(map(pUnits, function(u)
-		return Map.GetPlot(u:GetX(), u:GetY())
-	end))
-	enemyZone = subtract(enemyZone, pUnitLocs)
+	local eval = EvalMap(player)
+	local pZone = {}
+	local eZone = {}
+	for index, grade in pairs(eval) do
+		local plot = Map.GetPlotByIndex(index)
+		if grade >= 0 then
+			table.insert(pZone, index)
+		else
+			table.insert(eZone, index)
+		end
+	end
 	local frontier = {}
-	for _, plot in pairs(Index2Plots(playerZone)) do
-		if not table_contains(enemyZone, plot:GetIndex()) then
-			local adjPlots = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
-			local contain = false
-			for _, adj in pairs(adjPlots) do
-				local adjIndex = adj:GetIndex()
-				if table_contains(enemyZone, adjIndex) then
-					contain = true
-					break
-				end
-			end
-			if contain then
-				table.insert(frontier, plot)
+	for _, index in pairs(pZone) do
+		local plot = Map.GetPlotByIndex(index)
+		local adjPlots = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
+		for _, adjPlot in pairs(adjPlots) do
+			local adjIndex = adjPlot:GetIndex()
+			if table_contains(eZone, adjIndex) then
+				table.insert(frontier, adjPlot)
 			end
 		end
 	end
-	frontier = filter(frontier, function(p)
-		return not p:IsMountain()
-	end)
 	return frontier
 end
 
