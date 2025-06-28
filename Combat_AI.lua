@@ -54,6 +54,14 @@ local function table_contains(tbl, val)
 	return false
 end
 
+local function keys(tbl)
+	local result = {}
+	for k, _ in pairs(tbl) do
+		table.insert(result, k)
+	end
+	return result
+end
+
 local function compose(f, g)
 	return function(...)
 		return f(g(...))
@@ -991,24 +999,26 @@ end
 
 function GetFrontier(player)
 	local eval = EvalMap(player)
-	local pZone = {}
-	local eZone = {}
+	playerZone = {}
+	enemyZone = {}
 	for index, grade in pairs(eval) do
-		local plot = Map.GetPlotByIndex(index)
-		if grade >= 0 then
-			table.insert(pZone, index)
+		if grade > 0 then
+			playerZone[index] = grade
 		else
-			table.insert(eZone, index)
+			enemyZone[index] = grade
 		end
 	end
 	local frontier = {}
-	for _, index in pairs(pZone) do
+	for _, index in pairs(keys(playerZone)) do
+		local grade = playerZone[index]
 		local plot = Map.GetPlotByIndex(index)
 		local adjPlots = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
 		for _, adjPlot in pairs(adjPlots) do
 			local adjIndex = adjPlot:GetIndex()
-			if table_contains(eZone, adjIndex) then
-				table.insert(frontier, adjPlot)
+			local eGrade = enemyZone[adjIndex]
+			if eGrade and eGrade < -0.2 and grade - eGrade > 1 then
+				table.insert(frontier, plot)
+				break
 			end
 		end
 	end
@@ -1021,7 +1031,7 @@ function Distance2Front(plot)
 	plot = Map.GetPlot(plot:GetX(), plot:GetY())
 	local index = plot:GetIndex()
 	local dist = Distance2Plots(plot, front)
-	if enemyZone and table_contains(enemyZone, index) then
+	if enemyZone[index] then
 		return -dist
 	end
 	return dist
