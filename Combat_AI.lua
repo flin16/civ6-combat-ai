@@ -340,6 +340,12 @@ function GetPromotionTable()
 end
 
 function Promote(unit)
+	local exp = unit:GetExperience()
+	local expToNext = exp:GetExperienceForNextLevel()
+	local expNow = exp:GetExperiencePoints()
+	if expNow < expToNext then
+		return
+	end
 	print("Promoting unit:", unit:GetID(), "at", unit:GetX(), unit:GetY())
 	local unitType = unit:GetUnitType()
 	local unitInfo = GameInfo.Units[unitType]
@@ -430,19 +436,11 @@ function OnPlayerTurnActivated(playerID)
 		end
 	end
 	for _, unit in player:GetUnits():Members() do
-		local exp = unit:GetExperience()
-		local expToNext = exp:GetExperienceForNextLevel()
-		local expNow = exp:GetExperiencePoints()
-		if expNow >= expToNext then
-			Promote(unit)
-		elseif IsAir(unit) then
+		Promote(unit)
+		if IsAir(unit) then
 			if UnitHealthy(unit) then
 				UnitRangeAttack(unit)
 			end
-		--TODO: overhaul logic
-		-- elseif unit:GetRange() > 0 then
-		-- elseif unit:GetCombat() > 0 then
-		-- end
 		else
 			local attacked = false
 			if not UnitHealthy(unit) and Distance2Plots(unit, front) < 5 then
@@ -793,13 +791,7 @@ end
 
 function Escape(unit)
 	print("Escaping unit:", unit:GetID(), "at", unit:GetX(), unit:GetY())
-	return Shift(unit, function(p)
-		local dist = Distance2Front(p)
-		if dist <= 4 then
-			return dist
-		end
-		return false
-	end)
+	return Shift(unit, Distance2Front)
 end
 
 function GetEnemies(player)
