@@ -400,6 +400,9 @@ end
 local playerZone = {}
 local enemyZone = {}
 local front = {}
+local pStrength = 0
+local eStrength = 0
+local strengthDiff = 0
 
 GetPromotionTable()
 GetHashTable()
@@ -416,8 +419,9 @@ function OnPlayerTurnActivated(playerID)
 	Research(player)
 	GetCities(player)
 	front = GetFrontier(player)
+	strengthDiff = GetStrengthDiff(player)
+	-- Do this lastly
 	ShowEval(player)
-	local strengthDiff = GetStrengthDiff(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
 		DistrictAttack(city)
@@ -537,12 +541,6 @@ function EvalMap(player)
 			end
 		end
 	end
-	local neg = function(r)
-		if not r then
-			return false
-		end
-		return -r
-	end
 	local const = function(n)
 		return function(_)
 			return n
@@ -570,7 +568,7 @@ function EvalMap(player)
 		end
 	end
 	local function eval_unit(unit)
-		return 1.0 - unit:GetDamage() / unit:GetMaxDamage()
+		return (1.0 - unit:GetDamage() / unit:GetMaxDamage()) * unit:GetCombat() / pStrength
 	end
 	local vassals = GetVassals(player)
 	local vassalID = map(vassals, function(v)
@@ -586,7 +584,7 @@ function EvalMap(player)
 		return DfsManager(city, limitN(2))
 	end)
 	grader(eCities, function(city)
-		return DfsManager(city, compose(neg, limitN(3)))
+		return DfsManager(city, mul(limitN(3), -1))
 	end)
 	local pDomain = GetOwnedPlots(player)
 	local vDomain = map_union(GetVassals(player), GetOwnedPlots)
@@ -604,13 +602,13 @@ function EvalMap(player)
 	local vUnits = map_union(vassals, GetPlayerUnits)
 	local eUnits = GetEnemyUnits(player)
 	grader(pUnits, function(unit)
-		return DfsManager(unit, limitN(2))
+		return DfsManager(unit, mul(limitN(2), eval_unit(unit)))
 	end)
 	grader(vUnits, function(unit)
 		return DfsManager(unit, limitN(1))
 	end)
 	grader(eUnits, function(unit)
-		return DfsManager(unit, mul(limitN(2), -1))
+		return DfsManager(unit, mul(mul(limitN(2), eval_unit(unit)), -1))
 	end)
 	return tot
 end
@@ -863,8 +861,8 @@ function GetStrengthDiff(player)
 	if #eUnits == 0 then
 		return 1000
 	end
-	local pStrength = GetStrength(pUnits)
-	local eStrength = GetStrength(eUnits)
+	pStrength = GetStrength(pUnits)
+	eStrength = GetStrength(eUnits)
 	if eStrength == 0 then
 		return 1000
 	end
