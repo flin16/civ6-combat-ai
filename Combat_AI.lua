@@ -345,6 +345,7 @@ function OnPlayerTurnActivated(playerID)
 	Research(player)
 	front = GetFrontier(player)
 	GetCities(true)
+	show(EvalMap(player))
 	local strengthDiff = GetStrengthDiff(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
@@ -416,6 +417,48 @@ function OnPlayerTurnActivated(playerID)
 	end
 end
 
+<<<<<<< Updated upstream
+=======
+function EvalMap(player)
+	local var = "Value" -- constant
+	local function grader(objs, func)
+		for _, obj in pairs(objs) do
+			local plots = func(obj)
+			for _, plot in pairs(plots) do
+				plot = Map.GetPlot(plot:GetX(), plot:GetY())
+				local oldValue = plot:GetProperty(var) or 0
+				local newValue = oldValue + plot.dfs
+				plot:SetProperty(var, newValue)
+			end
+		end
+	end
+	local function limit5turn(u, t)
+		local dist = Turn2Plots(u, { t })
+		if dist <= 5 then
+			return dist
+		end
+		return false
+	end
+	local pCities = filter(aCities, function(c)
+		return Game.GetLocalPlayer() == c:GetOwner()
+	end)
+	grader(pCities, function(city)
+		return DfsManager(city, limit5turn)
+	end)
+	grader(eCities, function(city)
+		return DfsManager(
+			city,
+			compose(function(r)
+				if not r then
+					return false
+				end
+				return -r
+			end, limit5turn)
+		)
+	end)
+end
+
+>>>>>>> Stashed changes
 function UnitHealthy(pUnit)
 	return pUnit:GetDamage() < pUnit:GetMaxDamage() * 0.3
 end
@@ -574,6 +617,7 @@ function Rush(unit, lowBound)
 end
 
 function Escape(unit)
+	print("Escaping unit:", unit:GetID(), "at", unit:GetX(), unit:GetY())
 	return Shift(unit, function(p)
 		local dist = Distance2Front(p)
 		if dist <= 4 then
