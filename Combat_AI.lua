@@ -32,6 +32,21 @@ local function filter(tbl, func)
 	return result
 end
 
+local function table_contains(tbl, val)
+	for _, v in pairs(tbl) do
+		if v == val then
+			return true
+		end
+	end
+	return false
+end
+
+local function compose(f, g)
+	return function(...)
+		return f(g(...))
+	end
+end
+
 local function table_union(ts)
 	local result = {}
 	if not ts then
@@ -42,6 +57,49 @@ local function table_union(ts)
 			for _, v in ipairs(t) do
 				table.insert(result, v)
 			end
+		end
+	end
+	return result
+end
+
+local function unique(t)
+	local result = {}
+	for _, v in ipairs(t) do
+		if not table_contains(result, v) then
+			table.insert(result, v)
+		end
+	end
+	return result
+end
+
+local function union(...)
+	local tables = { ... }
+	local result = {}
+	for _, tbl in ipairs(tables) do
+		for _, v in ipairs(tbl) do
+			table.insert(result, v)
+		end
+	end
+	result = unique(result)
+	return result
+end
+local function map_union(tbl, func)
+	local results = {}
+	for _, v in pairs(tbl) do
+		local sub_results = func(v)
+		results = union(results, sub_results)
+	end
+	return results
+end
+
+local function subtract(tbl1, tbl2)
+	local result = {}
+	if not tbl1 then
+		return result
+	end
+	for _, v in ipairs(tbl1) do
+		if not table_contains(tbl2, v) then
+			table.insert(result, v)
 		end
 	end
 	return result
@@ -80,15 +138,6 @@ local function show(t)
 		print(k, x, y)
 		UI.AddWorldViewText(0, "Here", x, y, 0)
 	end
-end
-
-local function table_contains(tbl, val)
-	for _, v in ipairs(tbl) do
-		if v == val then
-			return true
-		end
-	end
-	return false
 end
 
 local aCities = {}
@@ -345,7 +394,7 @@ function OnPlayerTurnActivated(playerID)
 	Research(player)
 	front = GetFrontier(player)
 	GetCities(true)
-	show(EvalMap(player))
+	ShowEval(player)
 	local strengthDiff = GetStrengthDiff(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
@@ -417,48 +466,93 @@ function OnPlayerTurnActivated(playerID)
 	end
 end
 
-<<<<<<< Updated upstream
-=======
-function EvalMap(player)
-	local var = "Value" -- constant
-	local function grader(objs, func)
-		for _, obj in pairs(objs) do
-			local plots = func(obj)
-			for _, plot in pairs(plots) do
-				plot = Map.GetPlot(plot:GetX(), plot:GetY())
-				local oldValue = plot:GetProperty(var) or 0
-				local newValue = oldValue + plot.dfs
-				plot:SetProperty(var, newValue)
+function ShowEval(player)
+	local eval = EvalMap(player)
+	local cnt = 0
+	for _, _ in pairs(eval) do
+		cnt = cnt + 1
+	end
+	for index, grade in pairs(eval) do
+		local plot = Map.GetPlotByIndex(index)
+		if plot then
+			local x = plot:GetX()
+			local y = plot:GetY()
+			print("Plot index:", index, "at", x, y, "Grade:", grade)
+			if grade then
+				UI.AddWorldViewText(0, tostring(grade), x, y, 0)
 			end
 		end
 	end
-	local function limit5turn(u, t)
-		local dist = Turn2Plots(u, { t })
-		if dist <= 5 then
-			return dist
-		end
-		return false
-	end
-	local pCities = filter(aCities, function(c)
-		return Game.GetLocalPlayer() == c:GetOwner()
-	end)
-	grader(pCities, function(city)
-		return DfsManager(city, limit5turn)
-	end)
-	grader(eCities, function(city)
-		return DfsManager(
-			city,
-			compose(function(r)
-				if not r then
-					return false
-				end
-				return -r
-			end, limit5turn)
-		)
-	end)
 end
 
->>>>>>> Stashed changes
+-- TODO: make this a frontier system
+function EvalMap(player)
+	local tot = {}
+	local function grader(objs, func)
+		for _, obj in pairs(objs) do
+			local plots, grades = func(obj)
+			for _, plot in pairs(plots) do
+				local index = plot:GetIndex()
+				if index then
+					if not tot[index] then
+						tot[index] = 0
+					end
+					tot[index] = tot[index] + (grades[index] or 0)
+				end
+			end
+		end
+	end
+	local function limitN(n)
+		return function(u, t)
+			local dist = Distance2Plots(u, { t })
+			if dist < n then
+				return (n - dist) / n
+			end
+		end
+	end
+	local neg = function(r)
+		if not r then
+			return false
+		end
+		return -r
+	end
+	local const = function(n)
+		return function(_)
+			return n
+		end
+	end
+	local function eval_wraper(func)
+		return function(p)
+			return { p }, { [p:GetIndex()] = func(p) }
+		end
+	end
+	local playerID = player:GetID()
+	local pCities = filter(aCities, function(c)
+		return playerID == c:GetOwner()
+	end)
+	grader(pCities, function(city)
+		return DfsManager(city, limitN(4))
+	end)
+	grader(eCities, function(city)
+		return DfsManager(city, compose(neg, limitN(5)))
+	end)
+	local pDomain = GetOwnedPlots(player)
+	local eDomain = map_union(GetEnemies(player), function(e)
+		return GetOwnedPlots(e)
+	end)
+	grader(pDomain, eval_wraper(const(1.5)))
+	grader(eDomain, eval_wraper(const(-1.5)))
+	local pUnits = GetPlayerUnits(player)
+	local eUnits = GetEnemyUnits(player)
+	grader(pUnits, function(unit)
+		return DfsManager(unit, limitN(2))
+	end)
+	grader(eUnits, function(unit)
+		return DfsManager(unit, compose(neg, limitN(2)))
+	end)
+	return tot
+end
+
 function UnitHealthy(pUnit)
 	return pUnit:GetDamage() < pUnit:GetMaxDamage() * 0.3
 end
@@ -546,17 +640,19 @@ function DfsManager(s, vis, exp)
 		exp = defaultExp
 	end
 	local visited = {}
+	local plots = {}
 	local results = {}
 	local function visit(plot)
-		if not visited[plot:GetIndex()] then
-			visited[plot:GetIndex()] = true
+		local index = plot:GetIndex()
+		if not visited[index] then
+			visited[index] = true
 			local result = plot
 			if vis ~= nil then
 				result = vis(s, plot)
 			end
 			if result ~= nil and result ~= false then
-				plot["result"] = plot
-				table.insert(results, plot)
+				table.insert(plots, plot)
+				results[index] = result
 				local adjs = exp(plot)
 				for _, adj in pairs(adjs) do
 					visit(adj)
@@ -566,7 +662,7 @@ function DfsManager(s, vis, exp)
 	end
 	local sPlot = Map.GetPlot(s:GetX(), s:GetY())
 	visit(sPlot)
-	return results
+	return plots, results
 end
 
 -- @parm grader a function(plot or unit) that returns a non-negative number or boolean, for the first case larger is better, for the second case for validation
@@ -801,50 +897,6 @@ function GetOwnedPlots(player)
 		end
 	end
 	return ans
-end
-
-local function unique(t)
-	local result = {}
-	for _, v in ipairs(t) do
-		if not table_contains(result, v) then
-			table.insert(result, v)
-		end
-	end
-	return result
-end
-
-local function union(...)
-	local tables = { ... }
-	local result = {}
-	for _, tbl in ipairs(tables) do
-		for _, v in ipairs(tbl) do
-			table.insert(result, v)
-		end
-	end
-	result = unique(result)
-	return result
-end
-
-local function subtract(tbl1, tbl2)
-	local result = {}
-	if not tbl1 then
-		return result
-	end
-	for _, v in ipairs(tbl1) do
-		if not table_contains(tbl2, v) then
-			table.insert(result, v)
-		end
-	end
-	return result
-end
-
-local function map_union(tbl, func)
-	local results = {}
-	for _, v in pairs(tbl) do
-		local sub_results = func(v)
-		results = union(results, sub_results)
-	end
-	return results
 end
 
 function Plots2Index(plot)
