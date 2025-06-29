@@ -45,6 +45,16 @@ local function filter(tbl, func)
 	return result
 end
 
+local function filter_array(tbl, func)
+	local result = {}
+	for _, k in ipairs(tbl) do
+		if func(k) then
+			table.insert(result, k)
+		end
+	end
+	return result
+end
+
 local function table_contains(tbl, val)
 	for _, v in pairs(tbl) do
 		if v == val then
@@ -347,7 +357,7 @@ function Promote(unit)
 	if expNow < expToNext then
 		return
 	end
-	print("Promoting unit:", unit:GetID(), "at", unit:GetX(), unit:GetY())
+	-- print("Promoting unit:", unit:GetID(), "at", unit:GetX(), unit:GetY())
 	local unitType = unit:GetUnitType()
 	local unitInfo = GameInfo.Units[unitType]
 	local promoClass = unitInfo.PromotionClass
@@ -432,19 +442,8 @@ function OnPlayerTurnActivated(playerID)
 	strengthDiff = GetStrengthDiff(player)
 	-- Do this lastly
 	-- Test best ranged position calculation
-	for _, plot in pairs(front) do
-		local adjs = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
-		local m = max(map(adjs, function(p)
-			local score = safetyGrade[p:GetIndex()]
-			if score >= 0 then
-				return 0
-			end
-			return -score * safetyGrade[plot:GetIndex()]
-		end))
-		m = math.sqrt(math.abs(m)) -- + (rangedGrade[plot:GetIndex()] or 0)
-		UI.AddWorldViewText(0, round(m, 2), plot:GetX(), plot:GetY(), 0)
-	end
 	-- ShowEval(player)
+	local match = Arrange(player)
 	for _, city in player:GetCities():Members() do
 		CityBuild(city)
 		DistrictAttack(city)
@@ -467,7 +466,21 @@ function OnPlayerTurnActivated(playerID)
 				elseif unit:GetRange() > 0 then
 					attacked = UnitRangeAttack(unit)
 					if not attacked then
-						if strengthDiff > 5 then
+						local uid = unit:GetID()
+						local plot = match[uid]
+						if match[uid] then
+							print(
+								"Tactical Move for unit:",
+								unit:GetX(),
+								", ",
+								unit:GetY(),
+								"to plot:",
+								plot:GetX(),
+								", ",
+								plot:GetY()
+							)
+							Move2Plot(unit, plot)
+						elseif strengthDiff > 5 then
 							Rush(unit, 0)
 						else
 							Rush(unit, 1)
@@ -496,6 +509,203 @@ function OnPlayerTurnActivated(playerID)
 			end
 		end
 	end
+end
+
+local function hungarian(cost)
+	local N = #cost
+	local u, v, p, way = {}, {}, {}, {}
+	for i = 0, N do
+		u[i] = 0
+		v[i] = 0
+		p[i] = 0
+		way[i] = 0
+	end
+	for i = 1, N do
+		p[0] = i
+		local minv, used = {}, {}
+		for j = 0, N do
+			minv[j] = math.huge
+			used[j] = false
+		end
+		local j0 = 0
+		local done = false
+		while not done do
+			used[j0] = true
+			local i0 = p[j0]
+			local delta = math.huge
+			local j1 = -1
+			for j = 1, N do
+				if not used[j] then
+					local cur = -cost[i0][j] - u[i0] - v[j]
+					if cur < minv[j] then
+						minv[j] = cur
+						way[j] = j0
+					end
+					if minv[j] < delta then
+						delta = minv[j]
+						j1 = j
+					end
+				end
+			end
+			for j = 0, N do
+				if used[j] then
+					u[p[j]] = u[p[j]] + delta
+					v[j] = v[j] - delta
+				else
+					minv[j] = minv[j] - delta
+				end
+			end
+
+			j0 = j1
+			if p[j0] == 0 then
+				done = true
+			end
+		end
+		while true do
+			local j1 = way[j0]
+			p[j0] = p[j1]
+			j0 = j1
+			if j0 == 0 then
+				break
+			end
+		end
+	end
+	local match = {}
+	for j = 1, N do
+		match[p[j]] = j
+	end
+	local value = 0
+	for i = 1, N do
+		value = value + cost[i][match[i]]
+	end
+	return match, value
+end
+
+local function pad_cost_matrix(cost)
+	local M = #cost
+	local N = #cost[1]
+	local size = math.max(M, N)
+	for i = 1, M do
+		for j = N + 1, size do
+			cost[i][j] = 0
+		end
+	end
+	for i = M + 1, size do
+		cost[i] = {}
+		for j = 1, size do
+			cost[i][j] = 0
+		end
+	end
+	return cost, size
+end
+
+function Arrange(player)
+	local function sgn(x)
+		if x < 0 then
+			return -1
+		end
+		return 1
+	end
+	local heatGrade = {}
+	for index, value in pairs(safetyGrade) do
+		local m = value or 0
+		local plot = Map.GetPlotByIndex(index)
+		local adjPlots = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
+		local maxAbs = 0
+		for _, adjPlot in pairs(adjPlots) do
+			local adjIndex = adjPlot:GetIndex()
+			local adjValue = safetyGrade[adjIndex] or 0
+			if sgn(adjValue) ~= sgn(m) then
+				maxAbs = math.max(maxAbs, math.abs(adjValue))
+			end
+		end
+		m = math.sqrt(math.abs(m * maxAbs))
+		if m > 0 then
+			heatGrade[index] = m
+		end
+	end
+	for i = 1, 2 do
+		local newHeatGrade = {}
+		for index, value in pairs(heatGrade) do
+			newHeatGrade[index] = value
+			local plot = Map.GetPlotByIndex(index)
+			local adjs = Map.GetAdjacentPlots(plot:GetX(), plot:GetY())
+			for _, adj in pairs(adjs) do
+				local adjIndex = adj:GetIndex()
+				if not newHeatGrade[adjIndex] then
+					newHeatGrade[adjIndex] = 0
+				end
+			end
+		end
+		heatGrade = newHeatGrade
+	end
+	local function cmp(a, b)
+		local ra = a:GetRange()
+		local rb = b:GetRange()
+		if ra == rb then
+			return a:GetRangedCombat() > b:GetRangedCombat()
+		end
+		return ra > rb
+	end
+	local rUnits = filter_array(GetPlayerUnits(player), function(u)
+		return u:GetRange() > 0 and not IsAir(u)
+	end)
+	local mUnits = filter_array(GetPlayerUnits(player), function(u)
+		return u:GetRange() == 0 and u:GetCombat() > 0
+	end)
+	table.sort(rUnits, cmp)
+	table.sort(mUnits, cmp)
+	local targets = {}
+	local indexs = {}
+	local mod = 0
+	if strengthDiff > 5 then
+		mod = 0.5
+	elseif strengthDiff < 0 then
+		mod = -0.5
+	end
+	for index, value in pairs(heatGrade) do
+		local totValue = value * (1 + mod) + rangedGrade[index] + safetyGrade[index] * (1 - mod)
+		table.insert(targets, { index = index, value = totValue })
+	end
+	table.sort(targets, function(a, b)
+		return a.value > b.value
+	end)
+	local function getPrefix(tbl, k)
+		local inds = {}
+		local res = {}
+		local i = 1
+		for _, item in pairs(tbl) do
+			table.insert(inds, item.index)
+			table.insert(res, item.value)
+			i = i + 1
+			if i > k then
+				break
+			end
+		end
+		return inds, res
+	end
+	indexs, targets = getPrefix(targets, 6)
+	local cost = {}
+	for i, unit in ipairs(rUnits) do
+		local dists = map(targets, function(t)
+			local _, turns = UnitManager.GetMoveToPath(unit, t)
+			return turns and turns[#turns] or 0
+		end)
+		table.insert(cost, dists)
+	end
+	cost = pad_cost_matrix(cost)
+	local match = hungarian(cost)
+	local res = {}
+	for k, v in pairs(match) do
+		local unit = rUnits[k]
+		local plot = Map.GetPlotByIndex(indexs[v])
+		if not unit or not plot then
+			break
+		end
+		res[unit:GetID()] = plot
+		UI.AddWorldViewText(0, unit:GetName(), plot:GetX(), plot:GetY(), 0)
+	end
+	return res
 end
 
 function ShowEval(player)
@@ -628,7 +838,7 @@ function EvalMap(player)
 		local plots = GetRangeAttackTargets(unit)
 		local grades = {}
 		for _, plot in pairs(plots) do
-			grades[plot:GetIndex()] = -1
+			grades[plot:GetIndex()] = -1.5
 		end
 		return plots, grades
 	end)
@@ -642,9 +852,11 @@ function EvalMap(player)
 	safetyGrade = tot
 	tot = {}
 	grader(aPlots, function(plot)
+		local sub = 0
 		if plot:IsHills() then
-			return 1
+			sub = sub + 1
 		end
+		return sub
 	end)
 	grader(pTowers, const(2))
 	grader(eCities, function(city)
